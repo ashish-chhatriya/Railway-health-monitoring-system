@@ -1,0 +1,122 @@
+import random
+import time
+
+import firebase_admin
+from firebase_admin import credentials, db
+
+
+DATABASE_URL = "https://railway-monitoring-system-default-rtdb.asia-southeast1.firebasedatabase.app/"
+SERVICE_ACCOUNT = "serviceAccountKey.json"
+RFID_TAGS = [f"Track1-{index}" for index in range(1, 21)]
+BASE_DISTANCE = 143.5
+
+
+def init_firebase():
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(SERVICE_ACCOUNT)
+        firebase_admin.initialize_app(cred, {"databaseURL": DATABASE_URL})
+
+
+def build_sample(iteration):
+    rfid_before = RFID_TAGS[iteration % len(RFID_TAGS)]
+    rfid_after = RFID_TAGS[(iteration + 1) % len(RFID_TAGS)]
+    temperature = round(random.uniform(31.0, 38.0), 1)
+    vibration = random.randint(260, 520)
+    phase = iteration % 30
+
+    if phase in {0, 1, 2}:
+        distance = round(random.uniform(143.1, 143.9), 2)
+        status = "STABLE"
+        probability = 5
+    elif phase in {3, 4, 5, 6}:
+        # Distance-only anomaly
+        distance = round(random.uniform(146.8, 149.4), 2)
+        temperature = round(random.uniform(32.0, 36.5), 1)
+        vibration = random.randint(280, 460)
+        status = "TRACK WIDENED"
+        probability = 86
+    elif phase in {7, 8, 9, 10}:
+        # Distance compression case
+        distance = round(random.uniform(139.8, 141.0), 2)
+        temperature = round(random.uniform(31.0, 35.0), 1)
+        vibration = random.randint(300, 470)
+        status = "TRACK COMPRESSED"
+        probability = 82
+    elif phase in {11, 12, 13, 14}:
+        # Temperature-only anomaly
+        distance = round(random.uniform(143.2, 144.0), 2)
+        temperature = round(random.uniform(49.5, 61.0), 1)
+        vibration = random.randint(300, 470)
+        status = "THERMAL STRESS"
+        probability = 89
+    elif phase in {15, 16, 17, 18}:
+        # Vibration-only anomaly
+        distance = round(random.uniform(143.0, 144.1), 2)
+        temperature = round(random.uniform(33.0, 37.0), 1)
+        vibration = random.randint(860, 1010)
+        status = "UNSTABLE VIBRATION"
+        probability = 93
+    elif phase in {19, 20, 21}:
+        # Repeated distance + temperature mixed anomaly
+        distance = round(random.uniform(145.8, 147.0), 2)
+        temperature = round(random.uniform(47.5, 54.0), 1)
+        vibration = random.randint(520, 700)
+        status = "TRACK + THERMAL STRESS"
+        probability = 90
+    elif phase in {22, 23, 24}:
+        # Repeated vibration + temperature mixed anomaly
+        distance = round(random.uniform(143.0, 144.2), 2)
+        temperature = round(random.uniform(46.0, 53.0), 1)
+        vibration = random.randint(870, 1015)
+        status = "VIBRATION + THERMAL STRESS"
+        probability = 95
+    elif phase in {25, 26}:
+        # Recovery/noisy region
+        distance = round(random.uniform(BASE_DISTANCE - 1.2, BASE_DISTANCE + 1.2), 2)
+        temperature = round(random.uniform(36.0, 43.0), 1)
+        vibration = random.randint(420, 680)
+        status = "RECOVERY"
+        probability = 35
+    else:
+        # Strong multi-sensor surge to repeatedly create full problem lists
+        distance = round(random.uniform(147.0, 150.0), 2)
+        temperature = round(random.uniform(50.0, 62.0), 1)
+        vibration = random.randint(900, 1023)
+        status = "MULTI-SENSOR ALERT"
+        probability = 97
+
+    return {
+        "distance": distance,
+        "temp": temperature,
+        "vibration": vibration,
+        "prob": probability,
+        "status": status,
+        "rfid_before": rfid_before,
+        "rfid_after": rfid_after,
+        "ts": time.time(),
+    }
+
+
+def main():
+    init_firebase()
+    ref = db.reference("/track_monitor/live")
+    iteration = 0
+    print("Simulator started with vibration, distance, and temperature anomalies enabled.")
+
+    try:
+        while True:
+            sample = build_sample(iteration)
+            ref.set(sample)
+            print(
+                f"[{sample['status']}] "
+                f"{sample['rfid_before']}->{sample['rfid_after']} | "
+                f"Dist={sample['distance']} | Temp={sample['temp']} C | Vib={sample['vibration']}"
+            )
+            iteration += 1
+            time.sleep(1.5)
+    except KeyboardInterrupt:
+        print("\nSimulator stopped.")
+
+
+if __name__ == "__main__":
+    main()
